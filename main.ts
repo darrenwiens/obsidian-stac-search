@@ -1,81 +1,39 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface StacSearchSettings {
+	stacApiUrl: string;
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const DEFAULT_SETTINGS: StacSearchSettings = {
+	stacApiUrl: 'https://planetarycomputer.microsoft.com/api/stac/v1'
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+export default class StacSearchPlugin extends Plugin {
+	settings: StacSearchSettings;
 
 	async onload() {
 		await this.loadSettings();
 
 		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.addRibbonIcon('globe', 'STAC Search', (evt: MouseEvent) => {
+			new StacSearchModal(this.app, this.settings, (result) => {
+				new Notice(`STAC Search saved to: ${result}`);
+			}).open();
 		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
 
 		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
+			id: 'stac-search-modal',
+			name: 'Open STAC Search modal',
 			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
+				new StacSearchModal(this.app, this.settings, (result) => {
+					new Notice(`STAC Search saved to: ${result}`);
+				}).open();
 			}
 		});
 
 		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
+		this.addSettingTab(new StacSearchSettingTab(this.app, this));
 	}
 
 	onunload() {
@@ -91,43 +49,215 @@ export default class MyPlugin extends Plugin {
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+class StacSearchModal extends Modal {
+	result: string;
+	settings: any;
+	onSubmit: (result: string) => void;
+
+	constructor(app: App, settings: any, onSubmit: (result: string) => void) {
 		super(app);
+		this.settings = settings;
+		this.onSubmit = onSubmit;
 	}
 
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
+	async onOpen() {
+		const { contentEl } = this;
+
+		contentEl.createEl("h1", { text: "STAC Search" });
+
+		async function fetchCollections(url: string) {
+			return fetch(url + '/collections')
+				.then(response => response.json())
+				.then(collectionsResult => {
+					return collectionsResult
+				})
+				.catch(error => {
+					console.error(error);
+				});
+		}
+
+		async function fetchItems(url: string, payload: object) {
+			const jsonPayload = JSON.stringify(payload);
+			const requestOptions = {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: jsonPayload
+			};
+			return fetch(url + '/search', requestOptions)
+				.then(response => response.json())
+				.then(itemsResult => {
+					return itemsResult
+				})
+				.catch(error => {
+					console.error(error);
+				});
+		}
+
+		function createDateInput(dateStr: string) {
+			const dateDiv = contentEl.createEl('div', { cls: 'setting-item' })
+			const dateLblDiv = dateDiv.createEl('div', { cls: 'setting-item-info' });
+			dateLblDiv.createEl('label', { cls: "setting-item-name" }).setText("Start Date:");
+			const dateInputDiv = dateDiv.createEl('div', { cls: 'setting-item-control' });
+			const dateInput = dateInputDiv.createEl('input', { cls: "setting-input" });
+			dateInput.type = 'date';
+			dateInput.id = 'myDateInput';
+			dateInput.value = dateStr
+			return dateInput
+		}
+
+		function createDate(offsetDays = 0) {
+			const d = new Date();
+			d.setDate(d.getDate() - offsetDays);
+			return d.toISOString().split("T")[0];
+		}
+
+		const inputs = {
+			stacApiUrl: this.settings.stacApiUrl,
+			collection: 'sentinel-2-l2a',
+			startDate: createDate(7),
+			endDate: createDate(0),
+			bbox: "-124,45,-123,46",
+			output: "stac-search.md"
+		}
+
+		new Setting(contentEl)
+			.setName("STAC API URL:")
+			.addText((text) =>
+				text
+					.setValue(inputs.stacApiUrl)
+					.onChange(async (value) => {
+						inputs.stacApiUrl = value
+						collectionsResult = await fetchCollections(value)
+
+						const collectionIds = []
+						for (const collection of collectionsResult.collections) {
+							collectionIds.push(collection.id)
+						}
+						collectionIds.sort()
+						console.log(collectionSelect)
+						collectionSelect.clear()
+
+						collectionSelect.addDropdown((dropdown) => {
+							dropdown.addOption("", "Select a collection")
+							for (const collection of collectionsResult.collections) {
+								dropdown.addOption(collection.id, collection.id)
+							}
+							dropdown.setValue(inputs.collection)
+
+							dropdown.onChange((value) => {
+								console.log(value)
+								inputs.collection = value
+							})
+						})
+					})
+			);
+
+		let collectionsResult = await fetchCollections(inputs.stacApiUrl)
+		const collectionIds = []
+		for (const collection of collectionsResult.collections) {
+			collectionIds.push(collection.id)
+		}
+		collectionIds.sort()
+
+		const collectionSelect = new Setting(contentEl)
+			.setName("STAC Collection:")
+			.addDropdown((dropdown) => {
+				dropdown.addOption("", "Select a collection")
+				for (const collection of collectionsResult.collections) {
+					dropdown.addOption(collection.id, collection.id)
+				}
+				dropdown.setValue(inputs.collection)
+
+				dropdown.onChange((value) => {
+					console.log(value)
+					inputs.collection = value
+				})
+			})
+
+		const startDateInput = createDateInput(inputs.startDate)
+		startDateInput.addEventListener('change', () => {
+			console.log('startDateInput changed: ' + startDateInput.value);
+			inputs.startDate = startDateInput.value
+		})
+
+		const endDateInput = createDateInput(inputs.endDate)
+		endDateInput.addEventListener('change', () => {
+			console.log('endDateInput changed: ' + endDateInput.value);
+			inputs.endDate = endDateInput.value
+		})
+
+		new Setting(contentEl)
+			.setName("Bounding Box w, s, e, n:")
+			.addText((text) =>
+				text
+					.setValue(inputs.bbox)
+					.onChange(async (value) => {
+						inputs.bbox = value
+					})
+			);
+
+		new Setting(contentEl)
+			.setName("Output File:")
+			.addText((text) =>
+				text
+					.setValue(inputs.output)
+					.onChange(async (value) => {
+						inputs.output = value
+					})
+			);
+
+		new Setting(contentEl)
+			.addButton((btn) =>
+				btn
+					.setButtonText("Submit")
+					.setCta()
+					.onClick(async () => {
+						const payload = {
+							"collections": [
+								inputs.collection
+							],
+							"bbox": inputs.bbox.split(',').map(Number),
+							"datetime": `${inputs.startDate}T00:00:00Z/${inputs.endDate}T23:59:59Z`
+						}
+						console.log('payload', payload)
+						const items = await fetchItems(inputs.stacApiUrl, payload)
+
+						const { vault } = this.app;
+						vault.create(inputs.output, JSON.stringify(items, null, 2))
+
+						this.close();
+						this.onSubmit(inputs.output);
+					}));
 	}
+
 
 	onClose() {
-		const {contentEl} = this;
+		const { contentEl } = this;
 		contentEl.empty();
 	}
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+class StacSearchSettingTab extends PluginSettingTab {
+	plugin: StacSearchPlugin;
 
-	constructor(app: App, plugin: MyPlugin) {
+	constructor(app: App, plugin: StacSearchPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
 	}
 
 	display(): void {
-		const {containerEl} = this;
+		const { containerEl } = this;
 
 		containerEl.empty();
 
 		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
+			.setName('STAC API URL')
+			.setDesc('Root URL for STAC API')
 			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
+				.setPlaceholder('Enter default STAC API URL')
+				.setValue(this.plugin.settings.stacApiUrl)
 				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
+					this.plugin.settings.stacApiUrl = value;
 					await this.plugin.saveSettings();
 				}));
 	}
