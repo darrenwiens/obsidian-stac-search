@@ -7,7 +7,7 @@ The repo depends on the latest plugin API (obsidian.d.ts) in Typescript Definiti
 
 This plugin contains the following functionality:
 - Adds a ribbon icon, which opens the STAC Search Modal when clicked.
-- Adds a command "Open Sample Modal" which opens the STAC Search Modal.
+- Adds a command "Open STAC Search Modal" which opens the STAC Search Modal.
 - Adds a plugin setting tab to the settings page.
 - Within the modal, set any parameters and `submit` the request.
 - The response will be saved to the specified output file.
